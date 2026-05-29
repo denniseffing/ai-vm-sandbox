@@ -1,0 +1,46 @@
+#!/bin/bash
+set -e
+
+export LIMA_SHELLENV_BLOCK="*"
+export LIMA_SHELLENV_ALLOW="JIRA_API_KEY,PORTKEY_API_KEY"
+
+ensure_exists() {
+  if ! limactl list ai-sandbox >/dev/null; then
+    echo "ai-sandbox does not exist yet, starting up a new sandbox..."
+    limactl start -y --progress "$(dirname "$0")/ai-sandbox.yaml"
+    echo "Successfully created VM."
+    limactl stop ai-sandbox
+  fi
+}
+
+shell() {
+  ensure_exists
+  echo "Starting ai-sandbox and entering shell..."
+  workdir="$(pwd)"
+  if limactl shell --start --workdir "/" ai-sandbox test -d "$workdir" 2>/dev/null; then
+    limactl shell --start --workdir "$workdir" --preserve-env ai-sandbox
+  else
+    echo "⚠️ The current directory is not mounted in the ai-sandbox"
+    limactl shell --start --workdir "/" ai-sandbox
+  fi
+}
+
+stop() {
+  limactl stop ai-sandbox
+}
+
+delete() {
+  limactl delete -f ai-sandbox
+}
+
+recreate() {
+  delete
+  ensure_exists
+}
+
+case "${1:-}" in
+  stop) stop ;;
+  delete) delete ;;
+  recreate) recreate ;;
+  *) shell ;;
+esac
