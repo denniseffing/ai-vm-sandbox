@@ -1,0 +1,280 @@
+#!/bin/bash
+#
+# smart-paste — Paste images into any remote SSH session from your Mac clipboard.
+#
+# When triggered via Ctrl+V in iTerm2, this script detects if the current tab
+# is an SSH session. If so, it grabs the clipboard image (raw data, copied file,
+# or image path), SCPs it to the remote server, and outputs the remote file path
+# into the terminal — works in any CLI context (shell, vim, Claude Code, etc.).
+#
+# If the tab is NOT an SSH session, it sends a normal ^V (quoted-insert).
+#
+# Zero configuration required — automatically detects the SSH host from the
+# running process. Works with any server you can SSH into.
+#
+# Clipboard handling (in priority order):
+#   1. Raw image data (e.g. screenshot via Cmd+Ctrl+Shift+4)
+#   2. File URL (e.g. image copied from Finder / CleanShot)
+#   3. Text path pointing to a local image file
+#   4. Regular text — pasted as-is
+#
+# Requirements:
+#   - macOS with iTerm2
+#   - pngpaste (brew install pngpaste)
+#
+# Setup:
+#   1. Put this script somewhere in your PATH and make it executable:
+#        chmod +x /path/to/smart-paste
+#
+#   2. Add an iTerm2 key binding:
+#        Settings → Keys → Key Bindings → +
+#        Keyboard Shortcut: ^v (Ctrl+V)
+#        Action: Run Coprocess
+#        Command: /path/to/smart-paste
+#
+#   3. (Recommended) Enable ControlMaster in ~/.ssh/config for faster SCP:
+#        Host *
+#          ControlMaster auto
+#          ControlPath ~/.ssh/sockets/%r@%h:%p
+#          ControlPersist 600
+#      Then: mkdir -p ~/.ssh/sockets
+#
+# Options (environment variables):
+#   SMART_PASTE_REMOTE_DIR  Remote directory for uploads (default: /tmp/clipboard-images)
+#
+# Debug: check /tmp/smart-paste.log if something isn't working.
+#
+# License: MIT
+
+set -euo pipefail
+
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+
+LOG=/tmp/smart-paste.log
+exec 2>"$LOG"
+echo "=== smart-paste triggered at $(date) ===" >&2
+
+REMOTE_DIR="${SMART_PASTE_REMOTE_DIR:-/tmp/clipboard-images}"
+IMAGE_EXTENSIONS="png|jpg|jpeg|gif|webp|bmp|tiff|svg"
+
+# ── Send normal ^V and exit ───────────────────────────────────────
+
+passthrough() {
+    echo "Passthrough: $1" >&2
+    printf '\x16'
+    exit 0
+}
+
+# ── Preflight checks ─────────────────────────────────────────────
+
+if ! command -v pngpaste &>/dev/null; then
+    osascript -e 'display notification "pngpaste not found. Run: brew install pngpaste" with title "smart-paste"' &
+    passthrough "pngpaste not found"
+fi
+
+# ── Detect if current iTerm2 tab is an SSH session ────────────────
+
+TTY=$(osascript -e 'tell application "iTerm2" to tell current session of current window to return tty' 2>/dev/null)
+echo "Current TTY: $TTY" >&2
+
+if [ -z "$TTY" ]; then
+    passthrough "could not get TTY"
+fi
+
+TTY_SHORT=$(basename "$TTY")
+echo "Checking processes on $TTY_SHORT" >&2
+
+# Find the ssh process running on this TTY
+SSH_PID=$(ps -t "$TTY_SHORT" -o pid=,comm= 2>/dev/null | awk '/ssh/{print $1; exit}')
+
+# If no ssh found directly, check if tmux is running and look inside the active pane
+if [ -z "$SSH_PID" ]; then
+    echo "No ssh on TTY directly; checking for tmux..." >&2
+    TMUX_PID=$(ps -t "$TTY_SHORT" -o pid=,comm= 2>/dev/null | awk '/tmux/{print $1; exit}')
+    if [ -n "$TMUX_PID" ]; then
+        echo "tmux detected (pid=$TMUX_PID), querying active pane TTY..." >&2
+        # Ask the tmux server (via any socket it owns) for the active pane's TTY.
+        # 'tmux display-message' writes to the client TTY, so we need to target the
+        # server via the socket used by the tmux process on this TTY.
+        TMUX_SOCKET=$(ps -p "$TMUX_PID" -o args= 2>/dev/null | awk '{
+            for(i=1;i<=NF;i++) if ($i=="-S" || $i=="--socket-path") { print $(i+1); exit }
+        }')
+        if [ -z "$TMUX_SOCKET" ]; then
+            # Default socket path: /private/tmp/tmux-<uid>/default
+            TMUX_SOCKET="/private/tmp/tmux-$(id -u)/default"
+        fi
+        echo "Using tmux socket: $TMUX_SOCKET" >&2
+        PANE_TTY=$(tmux -S "$TMUX_SOCKET" display-message -p '#{pane_tty}' 2>/dev/null)
+        echo "Active pane TTY: $PANE_TTY" >&2
+        if [ -n "$PANE_TTY" ]; then
+            PANE_TTY_SHORT=$(basename "$PANE_TTY")
+            SSH_PID=$(ps -t "$PANE_TTY_SHORT" -o pid=,comm= 2>/dev/null | awk '/ssh/{print $1; exit}')
+            echo "SSH PID from pane TTY: $SSH_PID" >&2
+        fi
+    fi
+fi
+
+if [ -z "$SSH_PID" ]; then
+    passthrough "no ssh on this TTY"
+fi
+
+# ── Extract SSH destination from process args ─────────────────────
+
+SSH_CMD=$(ps -p "$SSH_PID" -o args= 2>/dev/null)
+echo "SSH command: $SSH_CMD" >&2
+
+# Parse SSH connection parameters from the ssh command line.
+# Sets globals: REMOTE_HOST, SSH_PORT, SSH_CONTROL_PATH, SSH_EXTRA_OPTS
+parse_ssh_params() {
+    local args=($1)
+    local skip_next=false
+    # SSH flags that consume the next argument as a value
+    local value_flags="b c D E e F I i J L l m O o p Q R S W w"
+
+    SSH_PORT=""
+    SSH_CONTROL_PATH=""
+    SSH_EXTRA_OPTS=()
+    REMOTE_HOST=""
+
+    for ((i=1; i<${#args[@]}; i++)); do
+        if $skip_next; then
+            skip_next=false
+            continue
+        fi
+        local arg="${args[$i]}"
+        if [[ "$arg" == -* ]]; then
+            local flag="${arg:1:1}"
+            # Capture port
+            if [[ "$flag" == "p" ]]; then
+                if [ ${#arg} -eq 2 ]; then
+                    SSH_PORT="${args[$((i+1))]}"
+                    skip_next=true
+                else
+                    SSH_PORT="${arg:2}"
+                fi
+                continue
+            fi
+            # Capture -o options, specifically ControlPath
+            if [[ "$flag" == "o" ]]; then
+                local oval=""
+                if [ ${#arg} -eq 2 ]; then
+                    oval="${args[$((i+1))]}"
+                    skip_next=true
+                else
+                    oval="${arg:2}"
+                fi
+                if [[ "$(tr '[:upper:]' '[:lower:]' <<< "$oval")" == controlpath=* ]]; then
+                    SSH_CONTROL_PATH="${oval#*=}"
+                    # Strip surrounding quotes if any
+                    SSH_CONTROL_PATH="${SSH_CONTROL_PATH//\"/}"
+                fi
+                SSH_EXTRA_OPTS+=("-o" "$oval")
+                continue
+            fi
+            # Skip other value flags
+            if [[ " $value_flags " == *" $flag "* ]] && [ ${#arg} -eq 2 ]; then
+                skip_next=true
+            fi
+            continue
+        fi
+        # Stop at '--'
+        [[ "$arg" == "--" ]] && break
+        if [ -z "$REMOTE_HOST" ]; then
+            REMOTE_HOST="$arg"
+        fi
+    done
+}
+
+parse_ssh_params "$SSH_CMD"
+echo "Detected remote host: $REMOTE_HOST" >&2
+echo "Detected SSH port: ${SSH_PORT:-22}" >&2
+echo "Detected ControlPath: ${SSH_CONTROL_PATH:-none}" >&2
+
+if [ -z "$REMOTE_HOST" ]; then
+    passthrough "could not parse SSH host"
+fi
+
+# ── Helpers ───────────────────────────────────────────────────────
+
+upload_to_remote() {
+    local local_file="$1"
+    local filename
+    filename="$(date +%Y%m%d_%H%M%S)_$(basename "$local_file")"
+    local remote_path="${REMOTE_DIR}/${filename}"
+
+    # Build ssh and scp option arrays.
+    # Prefer reusing the existing ControlPath socket (no new TCP connection needed).
+    local ssh_opts=()
+    local scp_opts=()
+    if [ -n "$SSH_CONTROL_PATH" ] && [ -S "$SSH_CONTROL_PATH" ]; then
+        echo "Reusing ControlPath socket: $SSH_CONTROL_PATH" >&2
+        ssh_opts=("-o" "ControlPath=$SSH_CONTROL_PATH" "-o" "ControlMaster=no")
+        scp_opts=("-o" "ControlPath=$SSH_CONTROL_PATH" "-o" "ControlMaster=no")
+    else
+        echo "No active ControlPath socket; using port/opts from original command" >&2
+        if [ -n "$SSH_PORT" ]; then
+            ssh_opts+=("-p" "$SSH_PORT")
+            scp_opts+=("-P" "$SSH_PORT")  # scp uses uppercase -P
+        fi
+        if [ ${#SSH_EXTRA_OPTS[@]} -gt 0 ]; then
+            ssh_opts+=("${SSH_EXTRA_OPTS[@]}")
+            scp_opts+=("${SSH_EXTRA_OPTS[@]}")
+        fi
+    fi
+
+    echo "Uploading $local_file → ${REMOTE_HOST}:${remote_path}" >&2
+    ssh "${ssh_opts[@]}" "$REMOTE_HOST" "mkdir -p $REMOTE_DIR" 2>>"$LOG"
+    if scp -q "${scp_opts[@]}" "$local_file" "${REMOTE_HOST}:${remote_path}" 2>>"$LOG"; then
+        echo "Upload success: $remote_path" >&2
+        printf '%s' "$remote_path"
+    else
+        echo "SCP FAILED" >&2
+        osascript -e 'display notification "SCP upload failed" with title "smart-paste"' &
+    fi
+}
+
+is_image_file() {
+    [[ "$(tr '[:upper:]' '[:lower:]' <<< "$1")" =~ \.($IMAGE_EXTENSIONS)$ ]]
+}
+
+# ── Case 1: Raw image data in clipboard ──────────────────────────
+
+TMPIMG=$(mktemp /tmp/smart-paste-XXXXX.png)
+if pngpaste "$TMPIMG" 2>>"$LOG"; then
+    echo "Case 1: raw image data from clipboard" >&2
+    upload_to_remote "$TMPIMG"
+    rm -f "$TMPIMG"
+    exit 0
+fi
+rm -f "$TMPIMG"
+
+# ── Case 2: File URL (copied from Finder / screenshot app) ──────
+
+FILE_PATH=$(osascript -e 'POSIX path of (the clipboard as «class furl»)' 2>/dev/null)
+echo "File URL path: '$FILE_PATH'" >&2
+
+if [[ -n "$FILE_PATH" ]] && [[ -f "$FILE_PATH" ]] && is_image_file "$FILE_PATH"; then
+    echo "Case 2: file URL is an image" >&2
+    upload_to_remote "$FILE_PATH"
+    exit 0
+fi
+
+# ── Case 3: Text path to a local image file ─────────────────────
+
+CLIP_TEXT=$(pbpaste 2>/dev/null | tr -d '\0' | tr -d '\n')
+echo "Clipboard text: '$CLIP_TEXT'" >&2
+
+if [[ -n "$CLIP_TEXT" ]] && [[ -f "$CLIP_TEXT" ]] && is_image_file "$CLIP_TEXT"; then
+    echo "Case 3: text path to local image" >&2
+    upload_to_remote "$CLIP_TEXT"
+    exit 0
+fi
+
+# ── Case 4: Regular text — paste as-is ──────────────────────────
+
+if [ -n "$CLIP_TEXT" ]; then
+    echo "Case 4: regular text" >&2
+    printf '%s' "$CLIP_TEXT"
+else
+    echo "Nothing to paste" >&2
+fi
