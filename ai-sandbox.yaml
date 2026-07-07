@@ -17,6 +17,9 @@ mounts:
   - location: "~/.local/share/opencode"
     mountPoint: "{{ .Home }}/.local/share/opencode"
     writable: true
+  - location: "~/.config/claude"
+    mountPoint: "{{ .Home }}/.config/claude"
+    writable: true
 
 containerd:
   system: false
