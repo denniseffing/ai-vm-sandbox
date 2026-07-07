@@ -51,9 +51,13 @@ provision:
       cat << 'EOF' >> "$HOME/.zshenv"
       eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv zsh)"
       
+      export XDG_CACHE_HOME="$HOME/.cache"
+      export XDG_CONFIG_HOME="$HOME/.config"
+      export XDG_DATA_HOME="$HOME/.local/share"
+      export XDG_STATE_HOME="$HOME/.local/state"
+      
       export AI_SANDBOX="true"
       export PATH="$PATH:$HOME/.local/bin"
-      export XDG_CONFIG_HOME="$HOME/.config"
       export ZDOTDIR="${ZDOTDIR:=$XDG_CONFIG_HOME/zsh}"
       source "$ZDOTDIR/.zshenv"
       EOF
