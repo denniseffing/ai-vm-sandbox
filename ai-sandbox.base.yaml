@@ -15,6 +15,9 @@ mounts:
   - location: "~/.config/claude"
     mountPoint: "{{ .Home }}/.config/claude"
     writable: true
+  - location: "~/.config/pi"
+    mountPoint: "{{ .Home }}/.config/pi"
+    writable: true
 
 containerd:
   system: false
@@ -47,18 +50,22 @@ provision:
       # Add shell config
       cat << 'EOF' >> "$HOME/.zshenv"
       eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv zsh)"
-
+      
+      export AI_SANDBOX="true"
+      
       export XDG_CACHE_HOME="$HOME/.cache"
       export XDG_CONFIG_HOME="$HOME/.config"
       export XDG_DATA_HOME="$HOME/.local/share"
       export XDG_STATE_HOME="$HOME/.local/state"
 
-      export AI_SANDBOX="true"
       export PATH="$PATH:$HOME/.local/bin"
+      
+      export PI_CODING_AGENT_DIR="$XDG_CONFIG_HOME/pi/agent"
+      
       export ZDOTDIR="${ZDOTDIR:=$XDG_CONFIG_HOME/zsh}"
       source "$ZDOTDIR/.zshenv"
       EOF
 
       # Install tools
-      brew install television opencode glab uv go
+      brew install television opencode glab uv go pi-coding-agent
       brew install --cask claude-code
