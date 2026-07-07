@@ -10,12 +10,10 @@
 ./sandbox delete            # delete sandbox
 ```
 
-> ℹ️ Look at the following defaults in `ai-sandbox.yaml`and adapt them for your setup:
-> 
-> - Directory mounts – the default configuration expects your ZSH shell config in `~/.config/zsh` and your development > projects the agent should have access to in `~/projects`.
-> - usermod usernames – they are set to my personal usernames by default
+> ℹ️ The sandbox configuration is split into a shared base and a tracked user configuration.
+> Adapt the user configuration in `ai-sandbox.user.yaml` to your personal setup.
 
-## Additional Features
+## ✨ Additional Features
 
 ### Support for pasting images (macOS only)
 

@@ -1,70 +1,11 @@
 base:
-  - template:_images/ubuntu
-
-cpus: 4
-memory: "10GiB"
-disk: "50GiB"
+  - ./ai-sandbox.base.yaml
 
 mounts:
-  - location: "~/projects"
-    writable: true
+  # mount shell configuration for a familiar shell experience
   - location: "~/.config/zsh"
     mountPoint: "{{ .Home }}/.config/zsh"
     writable: true
-  - location: "~/.config/opencode"
-    mountPoint: "{{ .Home }}/.config/opencode"
+  # mount project directory for agent access
+  - location: "~/projects"
     writable: true
-  - location: "~/.local/share/opencode"
-    mountPoint: "{{ .Home }}/.local/share/opencode"
-    writable: true
-  - location: "~/.config/claude"
-    mountPoint: "{{ .Home }}/.config/claude"
-    writable: true
-
-containerd:
-  system: false
-  user: false
-
-provision:
-  - mode: system
-    script: |
-      #!/bin/bash
-
-      # System Basics
-      apt-get update
-      apt-get upgrade -y
-      apt-get install -y htop vim curl git zsh ca-certificates jq yq zip build-essential
-      
-      usermod -s /bin/zsh effing
-      usermod -s /bin/zsh denniseffing
-
-      # Docker
-      curl -fsSL https://get.docker.com | bash
-  - mode: user
-    script: |
-      #!/bin/bash
-
-      # Add self to docker group
-      sudo usermod -aG docker "$USER"
-
-      # install brew
-      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-      
-      # Add shell config
-      cat << 'EOF' >> "$HOME/.zshenv"
-      eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv zsh)"
-      
-      export XDG_CACHE_HOME="$HOME/.cache"
-      export XDG_CONFIG_HOME="$HOME/.config"
-      export XDG_DATA_HOME="$HOME/.local/share"
-      export XDG_STATE_HOME="$HOME/.local/state"
-      
-      export AI_SANDBOX="true"
-      export PATH="$PATH:$HOME/.local/bin"
-      export ZDOTDIR="${ZDOTDIR:=$XDG_CONFIG_HOME/zsh}"
-      source "$ZDOTDIR/.zshenv"
-      EOF
-
-      # Install tools
-      brew install television opencode glab uv go
-      brew install --cask claude-code
