@@ -2,7 +2,7 @@
 set -e
 
 export LIMA_SHELLENV_BLOCK="*"
-export LIMA_SHELLENV_ALLOW="JIRA_API_KEY,PORTKEY_API_KEY"
+export LIMA_SHELLENV_ALLOW="JIRA_API_KEY,PORTKEY_API_KEY,REQUESTY_API_KEY,ANTHROPIC_AUTH_TOKEN"
 
 ensure_exists() {
   if ! limactl list ai-sandbox >/dev/null; then
