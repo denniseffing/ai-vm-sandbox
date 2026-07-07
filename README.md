@@ -1,4 +1,4 @@
-# ai-vm-sandbox
+# 🤖 📦 ai-vm-sandbox
 
 ## 🚀 Quickstart
 
@@ -11,7 +11,14 @@
 ```
 
 > ℹ️ The sandbox configuration is split into a shared base and a tracked user configuration.
-> Adapt the user configuration in `ai-sandbox.user.yaml` to your personal setup.
+> 
+> - Adapt the `ai-sandbox.user.yaml` config to your personal setup.
+> - Adapt the `LIMA_SHELLENV_ALLOW` config in `sandbox` to pass additional environment variables into the sandbox, if needed.
+
+### Recommendations
+
+1. Mount your local shell configuration for a familiar shell experience. Make sure that it doesn't contain any sensitive information (e.g., credentials) beforehand.
+2. Inject credentials via environment variables into the sandbox.
 
 ## ✨ Additional Features
 
