@@ -7,7 +7,7 @@ export LIMA_SHELLENV_ALLOW="JIRA_API_KEY,PORTKEY_API_KEY,REQUESTY_API_KEY,ANTHRO
 ensure_exists() {
   if ! limactl list ai-sandbox >/dev/null; then
     echo "ai-sandbox does not exist yet, starting up a new sandbox..."
-    limactl start -y --progress "$(dirname "$0")/ai-sandbox.yaml"
+    limactl start -y "$(dirname "$0")/ai-sandbox.yaml"
     echo "Successfully created VM."
     limactl stop ai-sandbox
   fi
