@@ -70,5 +70,5 @@ provision:
       EOF
 
       # Install tools
-      brew install television opencode glab uv go pi-coding-agent
+      brew install codex glab go herdr opencode pi-coding-agent television uv 
       brew install --cask claude-code
