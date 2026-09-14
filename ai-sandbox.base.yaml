@@ -37,6 +37,10 @@ provision:
       apt-get install -y htop vim curl git zsh ca-certificates jq yq zip build-essential
 
       usermod -s /bin/zsh "{{ .User }}"
+      
+      # Accept environment variables via SSH
+      grep -qxF 'AcceptEnv *' /etc/ssh/sshd_config || echo 'AcceptEnv *' >> /etc/ssh/sshd_config
+      systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null
 
       # Docker
       curl -fsSL https://get.docker.com | bash
