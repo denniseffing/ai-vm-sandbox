@@ -6,6 +6,9 @@ memory: "10GiB"
 disk: "50GiB"
 
 mounts:
+  - location: "~/.config/codex"
+    mountPoint: "{{ .Home }}/.config/codex"
+    writable: true
   - location: "~/.config/opencode"
     mountPoint: "{{ .Home }}/.config/opencode"
     writable: true
@@ -69,6 +72,7 @@ provision:
 
       export PATH="$PATH:$HOME/.local/bin"
       
+      export CODEX_HOME="$XDG_CONFIG_HOME/codex"
       export PI_CODING_AGENT_DIR="$XDG_CONFIG_HOME/pi/agent"
       
       export ZDOTDIR="${ZDOTDIR:=$XDG_CONFIG_HOME/zsh}"
