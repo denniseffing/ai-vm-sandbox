@@ -28,6 +28,7 @@ containerd:
 
 provision:
   - mode: system
+    # language="shell script"
     script: |
       #!/bin/bash
 
@@ -45,6 +46,7 @@ provision:
       # Docker
       curl -fsSL https://get.docker.com | bash
   - mode: user
+    # language="shell script"
     script: |
       #!/bin/bash
 
@@ -74,5 +76,8 @@ provision:
       EOF
 
       # Install tools
-      brew install codex glab go opencode pi-coding-agent television uv 
+      brew install \
+        glab mise television uv `# general cli tooling` \
+        codex anomalyco/tap/opencode-v2 pi-coding-agent `# coding agents`
+      
       brew install --cask claude-code
