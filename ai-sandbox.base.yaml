@@ -29,6 +29,9 @@ containerd:
   system: false
   user: false
 
+user:
+  shell: /bin/zsh
+
 provision:
   - mode: system
     # language="shell script"
